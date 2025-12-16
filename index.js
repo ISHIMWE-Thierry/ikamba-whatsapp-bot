@@ -7,15 +7,21 @@ import makeWASocket, {
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
+import QRCode from 'qrcode';
+import express from 'express';
 import fs from 'fs';
 import path from 'path';
 
 // Configuration
 const IKAMBA_API_URL = process.env.IKAMBA_API_URL || 'https://hpersona.vercel.app/api/chat';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const PORT = process.env.PORT || 3000;
 
 // Store conversation contexts
 const conversationContexts = new Map();
+
+// Store current QR code
+let currentQR = null;
+let isConnected = false;
 
 // Logger
 const logger = pino({ level: 'silent' });
@@ -25,6 +31,101 @@ const mediaDir = './media';
 if (!fs.existsSync(mediaDir)) {
   fs.mkdirSync(mediaDir, { recursive: true });
 }
+
+// Setup Express server for QR code display
+const app = express();
+
+app.get('/', (req, res) => {
+  if (isConnected) {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Ikamba WhatsApp Bot</title>
+          <style>
+            body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #25D366, #128C7E); }
+            .container { text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+            h1 { color: #128C7E; }
+            .status { font-size: 24px; color: #25D366; }
+            .emoji { font-size: 60px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="emoji">✅</div>
+            <h1>Ikamba AI WhatsApp Bot</h1>
+            <p class="status">Connected & Running!</p>
+            <p>The bot is actively responding to messages.</p>
+          </div>
+        </body>
+      </html>
+    `);
+  } else if (currentQR) {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Scan QR Code - Ikamba Bot</title>
+          <meta http-equiv="refresh" content="30">
+          <style>
+            body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #25D366, #128C7E); }
+            .container { text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+            h1 { color: #128C7E; }
+            img { margin: 20px 0; border-radius: 10px; }
+            .instructions { color: #666; margin-top: 20px; }
+            .step { margin: 10px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>📱 Scan QR Code</h1>
+            <img src="${currentQR}" alt="QR Code" width="300" height="300">
+            <div class="instructions">
+              <p class="step">1. Open WhatsApp on your phone</p>
+              <p class="step">2. Go to Settings → Linked Devices</p>
+              <p class="step">3. Tap "Link a Device"</p>
+              <p class="step">4. Scan this QR code</p>
+            </div>
+            <p style="color: #999; font-size: 12px;">Page auto-refreshes every 30 seconds</p>
+          </div>
+        </body>
+      </html>
+    `);
+  } else {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Ikamba WhatsApp Bot</title>
+          <meta http-equiv="refresh" content="5">
+          <style>
+            body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #25D366, #128C7E); }
+            .container { text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+            h1 { color: #128C7E; }
+            .loading { font-size: 40px; animation: spin 1s linear infinite; }
+            @keyframes spin { 100% { transform: rotate(360deg); } }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="loading">⏳</div>
+            <h1>Starting Bot...</h1>
+            <p>Please wait, generating QR code...</p>
+          </div>
+        </body>
+      </html>
+    `);
+  }
+});
+
+app.get('/status', (req, res) => {
+  res.json({ connected: isConnected, hasQR: !!currentQR });
+});
+
+app.listen(PORT, () => {
+  console.log(`🌐 Web server running on port ${PORT}`);
+  console.log(`📱 Open your browser to scan QR code`);
+});
 
 async function connectToWhatsApp() {
   // Get auth state from file (persists session)
@@ -50,9 +151,20 @@ async function connectToWhatsApp() {
       console.log('\n📱 Scan this QR code with WhatsApp:\n');
       qrcode.generate(qr, { small: true });
       console.log('\nOpen WhatsApp → Settings → Linked Devices → Link a Device\n');
+      
+      // Generate QR code as data URL for web display
+      try {
+        currentQR = await QRCode.toDataURL(qr, { width: 300, margin: 2 });
+        isConnected = false;
+        console.log('🌐 QR code available at web interface');
+      } catch (err) {
+        console.error('Error generating QR image:', err);
+      }
     }
     
     if (connection === 'close') {
+      isConnected = false;
+      currentQR = null;
       const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
       
       console.log('Connection closed due to', lastDisconnect?.error?.message || 'unknown reason');
@@ -64,6 +176,8 @@ async function connectToWhatsApp() {
         console.log('Logged out. Delete auth_info folder and restart to re-login.');
       }
     } else if (connection === 'open') {
+      isConnected = true;
+      currentQR = null;
       console.log('\n✅ Connected to WhatsApp!');
       console.log('🤖 Ikamba AI Bot is now running...');
       console.log('📸 Image support: ENABLED');
