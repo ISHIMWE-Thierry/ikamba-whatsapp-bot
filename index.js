@@ -400,6 +400,11 @@ function formatForWhatsApp(text) {
 // Call Ikamba AI API
 async function callIkambaAI(messages, userId, hasImage = false) {
   try {
+    // Clean up WhatsApp JID to get just the phone number
+    // Format: 250788123456@s.whatsapp.net → 250788123456
+    const cleanPhone = userId.replace('@s.whatsapp.net', '').replace('@g.us', '');
+    const formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : `+${cleanPhone}`;
+    
     // Style instructions for casual Kinyarwanda-English mix
     const styleHint = `IMPORTANT STYLE RULES FOR WHATSAPP:
 - Reply like a cool Rwandan friend, mix Kinyarwanda & English naturally
@@ -408,7 +413,8 @@ async function callIkambaAI(messages, userId, hasImage = false) {
 - Common phrases: "ushaka iki?", "ni byiza", "komeza", "murakoze", "ese?", "nta kibazo"
 - Be friendly & direct, no formal stuff
 - For transfers: give quick numbers, skip long explanations
-- Example: "Yooo! 10k RUB = 145,000 RWF 🔥 Ushaka kohereza?"`;
+- Example: "Yooo! 10k RUB = 145,000 RWF 🔥 Ushaka kohereza?"
+- IMPORTANT: User's WhatsApp phone is ${formattedPhone} - use this as senderPhone when creating orders!`;
 
     // Add context about image if present
     const imageHint = hasImage 
@@ -427,9 +433,10 @@ async function callIkambaAI(messages, userId, hasImage = false) {
         })),
         mode: 'gpt',
         userInfo: {
-          userId: `whatsapp_${userId}`,
+          userId: `whatsapp_${cleanPhone}`,
           email: null,
           displayName: `WhatsApp User`,
+          phone: formattedPhone,
         },
         systemHint: styleHint + imageHint,
       }),
