@@ -467,11 +467,21 @@ EXAMPLES:
 - Payment: "Murakoze! Screenshot yohereze hano 📸"
 - Success: "Done bro! Amafaranga yagiye ✅"
 
-IMPORTANT FOR TRANSFERS:
-- Always ask for email (for order confirmation): "Email yawe ni iyihe?"
-- Ask for recipient details naturally, not like a form
-- When user sends payment screenshot, confirm: "Nabonye! Tuzagufasha vuba 💪"
-- IMPORTANT: User's WhatsApp phone is ${formattedPhone} - use this as senderPhone when creating orders!`;
+WHATSAPP VERIFICATION FLOW:
+If the user is NOT verified (check WHATSAPP USER STATUS in context):
+1. When they want to send money, first ask for their email: "Mbere yo kohereza, nkeneye email yawe. Ni iyihe?"
+2. Call request_whatsapp_verification function with their email
+3. Tell them: "Code noherereje kuri ${their_email}! Check email unyoherereze code ya 6 digits 🔐"
+4. When they send the code, call verify_whatsapp_code function
+5. If verified: "Nice! Ubu ushobora kohereza amafaranga 💪 Ushaka kohereza angahe?"
+
+If user is VERIFIED:
+- Proceed normally with transfer
+- Use their linked account info
+
+IMPORTANT:
+- User's WhatsApp phone is ${formattedPhone} - use this for verification and orders
+- DO NOT create orders for unverified users - verify first!`;
 
     // Add context about image if present
     const imageHint = hasImage 
