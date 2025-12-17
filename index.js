@@ -213,20 +213,26 @@ async function connectToWhatsApp() {
       // Get or create conversation context
       let context = conversationContexts.get(sender) || [];
       
-      // Build message content
+      // Build message content with image support
       let userContent = messageText || '';
+      let imageDataUrl = null;
+      
       if (hasImage && imageBase64) {
-        // For image messages, we'll describe it to the AI
-        userContent = messageText 
-          ? `[User sent an image with caption: "${messageText}"]` 
-          : '[User sent an image - likely a payment screenshot or document]';
+        // Create data URL for the image (for OpenAI Vision)
+        imageDataUrl = `data:image/jpeg;base64,${imageBase64}`;
+        
+        // Add caption context if present
+        if (!userContent) {
+          userContent = 'Please analyze this image.';
+        }
       }
       
-      // Add user message to context
+      // Add user message to context (with image reference)
       context.push({
         role: 'user',
         content: userContent,
         hasImage: hasImage,
+        imageUrl: imageDataUrl, // Store the actual image data URL
       });
       
       // Keep only last 20 messages
@@ -238,8 +244,8 @@ async function connectToWhatsApp() {
         // Show typing indicator
         await sock.sendPresenceUpdate('composing', sender);
         
-        // Call Ikamba AI
-        const aiResponse = await callIkambaAI(context, sender, hasImage);
+        // Call Ikamba AI with image data
+        const aiResponse = await callIkambaAI(context, sender, hasImage, imageDataUrl);
         
         // Format the response for WhatsApp
         const formattedResponse = formatForWhatsApp(aiResponse);
@@ -398,7 +404,7 @@ function formatForWhatsApp(text) {
 }
 
 // Call Ikamba AI API
-async function callIkambaAI(messages, userId, hasImage = false) {
+async function callIkambaAI(messages, userId, hasImage = false, currentImageUrl = null) {
   try {
     // Clean up WhatsApp JID to get just the phone number
     // Format: 250788123456@s.whatsapp.net → 250788123456
@@ -418,8 +424,24 @@ async function callIkambaAI(messages, userId, hasImage = false) {
 
     // Add context about image if present
     const imageHint = hasImage 
-      ? '\nNote: User sent an image. If payment screenshot, just say "Nabonye screenshot! ✅" and confirm.'
+      ? '\nNote: User sent an image. Analyze it carefully - if it\'s a payment screenshot, confirm the payment. If it\'s anything else, describe what you see briefly.'
       : '';
+    
+    // Build messages array with image support
+    const apiMessages = messages.map(m => {
+      // If this message has an image URL, format for OpenAI Vision
+      if (m.imageUrl) {
+        return {
+          role: m.role,
+          content: m.content,
+          images: [m.imageUrl], // Pass image as array for the API
+        };
+      }
+      return {
+        role: m.role,
+        content: m.content,
+      };
+    });
     
     const response = await fetch(IKAMBA_API_URL, {
       method: 'POST',
@@ -427,10 +449,7 @@ async function callIkambaAI(messages, userId, hasImage = false) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        messages: messages.map(m => ({
-          role: m.role,
-          content: m.content + (m.role === 'user' && m.hasImage ? ' [contains image]' : ''),
-        })),
+        messages: apiMessages,
         mode: 'gpt',
         userInfo: {
           userId: `whatsapp_${cleanPhone}`,
