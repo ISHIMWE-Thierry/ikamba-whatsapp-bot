@@ -5,8 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js"
+    "start": "rm -rf auth_info && node index.js",
+    "dev": "node --watch index.js",
+    "clean": "rm -rf auth_info"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",

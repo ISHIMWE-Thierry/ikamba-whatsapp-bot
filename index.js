@@ -122,6 +122,47 @@ app.get('/status', (req, res) => {
   res.json({ connected: isConnected, hasQR: !!currentQR });
 });
 
+// Reset endpoint - clears auth and restarts QR flow
+app.get('/reset', async (req, res) => {
+  try {
+    // Clear auth folder
+    const authPath = './auth_info';
+    if (fs.existsSync(authPath)) {
+      fs.rmSync(authPath, { recursive: true, force: true });
+    }
+    currentQR = null;
+    isConnected = false;
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Reset - Ikamba Bot</title>
+          <meta http-equiv="refresh" content="3;url=/">
+          <style>
+            body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #25D366, #128C7E); }
+            .container { text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🔄 Resetting...</h1>
+            <p>Auth cleared. Redirecting to QR code page...</p>
+            <p>Please restart the bot on Railway to generate new QR.</p>
+          </div>
+        </body>
+      </html>
+    `);
+    
+    console.log('🔄 Auth reset requested - restart bot to generate new QR');
+    
+    // Exit to trigger Railway restart
+    setTimeout(() => process.exit(0), 1000);
+  } catch (error) {
+    res.status(500).send('Error resetting: ' + error.message);
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🌐 Web server running on port ${PORT}`);
   console.log(`📱 Open your browser to scan QR code`);
