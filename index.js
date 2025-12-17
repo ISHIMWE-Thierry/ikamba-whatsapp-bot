@@ -471,7 +471,7 @@ WHATSAPP VERIFICATION FLOW:
 If the user is NOT verified (check WHATSAPP USER STATUS in context):
 1. When they want to send money, first ask for their email: "Mbere yo kohereza, nkeneye email yawe. Ni iyihe?"
 2. Call request_whatsapp_verification function with their email
-3. Tell them: "Code noherereje kuri ${their_email}! Check email unyoherereze code ya 6 digits 🔐"
+3. Tell them: "Code noherereje kuri [their email]! Check email unyoherereze code ya 6 digits 🔐"
 4. When they send the code, call verify_whatsapp_code function
 5. If verified: "Nice! Ubu ushobora kohereza amafaranga 💪 Ushaka kohereza angahe?"
 
