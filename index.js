@@ -350,6 +350,9 @@ async function extractMessageContent(msg, sock) {
   return { text, imageBase64, hasImage };
 }
 
+// Ikamba AI Badge
+const IKAMBA_BADGE = `\n\n━━━━━━━━━━━━━━━━━━\n🤖 *Ikamba AI* by ikambaremit.com`;
+
 // Format response for WhatsApp with rich formatting
 function formatForWhatsApp(text) {
   let formatted = text;
@@ -388,15 +391,28 @@ function formatForWhatsApp(text) {
   // Add spacing after sections
   formatted = formatted.replace(/\n{3,}/g, '\n\n');
   
+  // Add Ikamba AI badge at the end
+  formatted = formatted + IKAMBA_BADGE;
+  
   return formatted;
 }
 
 // Call Ikamba AI API
 async function callIkambaAI(messages, userId, hasImage = false) {
   try {
+    // Style instructions for casual Kinyarwanda-English mix
+    const styleHint = `IMPORTANT STYLE RULES FOR WHATSAPP:
+- Reply like a cool Rwandan friend, mix Kinyarwanda & English naturally
+- Keep it SUPER SHORT - max 10 words if possible!
+- Use casual greetings like "Yooo", "Eh boss", "Mwaramutse", "Oya", "Yego"
+- Common phrases: "ushaka iki?", "ni byiza", "komeza", "murakoze", "ese?", "nta kibazo"
+- Be friendly & direct, no formal stuff
+- For transfers: give quick numbers, skip long explanations
+- Example: "Yooo! 10k RUB = 145,000 RWF 🔥 Ushaka kohereza?"`;
+
     // Add context about image if present
-    const systemHint = hasImage 
-      ? 'The user has sent an image. If it appears to be a payment screenshot, acknowledge it and ask them to confirm the payment details.'
+    const imageHint = hasImage 
+      ? '\nNote: User sent an image. If payment screenshot, just say "Nabonye screenshot! ✅" and confirm.'
       : '';
     
     const response = await fetch(IKAMBA_API_URL, {
@@ -415,7 +431,7 @@ async function callIkambaAI(messages, userId, hasImage = false) {
           email: null,
           displayName: `WhatsApp User`,
         },
-        systemHint,
+        systemHint: styleHint + imageHint,
       }),
     });
 
