@@ -17,6 +17,9 @@ const IKAMBA_API_URL = process.env.IKAMBA_API_URL || 'https://hpersona.vercel.ap
 const PORT = process.env.PORT || 3000;
 const PAUSE_DURATION_MS = 60 * 60 * 1000; // 1 hour in milliseconds
 
+// Secret admin command to pause/resume (only you should know this)
+const PAUSE_COMMAND = process.env.PAUSE_COMMAND || '/ikambapause';
+
 // Store conversation contexts
 const conversationContexts = new Map();
 
@@ -317,8 +320,10 @@ async function connectToWhatsApp() {
       // Debug log for all messages
       console.log(`📨 Message - From: ${sender?.substring(0, 15)}..., FromMe: ${isFromMe}, Type: ${type}, Text: "${rawText.substring(0, 30)}"`);
       
-      // Handle "..." command from bot owner to pause/resume chat
-      if (isFromMe && rawText.trim() === '...') {
+      // Handle pause command - works from self OR with secret command from anyone
+      const isPauseCommand = rawText.trim() === '...' || rawText.trim().toLowerCase() === PAUSE_COMMAND.toLowerCase();
+      
+      if (isPauseCommand && (isFromMe || rawText.trim().toLowerCase() === PAUSE_COMMAND.toLowerCase())) {
         console.log(`🎯 PAUSE COMMAND DETECTED for chat: ${sender}`);
         // Toggle pause for this chat
         if (pausedChats.has(sender)) {
@@ -334,7 +339,7 @@ async function connectToWhatsApp() {
           pausedChats.set(sender, expiryTime);
           console.log(`⏸️  Chat PAUSED for 1 hour: ${sender}`);
           await sock.sendMessage(sender, { 
-            text: '⏸️ *Bot paused* - I won\'t respond in this chat for 1 hour.\nSend "..." again to resume.' 
+            text: '⏸️ *Bot paused* - I won\'t respond in this chat for 1 hour.\nSend the command again to resume.' 
           });
         }
         continue;
