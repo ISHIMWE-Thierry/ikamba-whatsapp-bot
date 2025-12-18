@@ -15,9 +15,16 @@ import path from 'path';
 // Configuration
 const IKAMBA_API_URL = process.env.IKAMBA_API_URL || 'https://hpersona.vercel.app/api/chat';
 const PORT = process.env.PORT || 3000;
+const PAUSE_DURATION_MS = 60 * 60 * 1000; // 1 hour in milliseconds
 
 // Store conversation contexts
 const conversationContexts = new Map();
+
+// Store paused chats with expiry time
+const pausedChats = new Map();
+
+// Your WhatsApp number (will be detected automatically)
+let myNumber = null;
 
 // Store current QR code
 let currentQR = null;
@@ -119,7 +126,62 @@ app.get('/', (req, res) => {
 });
 
 app.get('/status', (req, res) => {
-  res.json({ connected: isConnected, hasQR: !!currentQR });
+  // Build paused chats info
+  const pausedChatsList = [];
+  for (const [chat, expiry] of pausedChats.entries()) {
+    const remainingMins = Math.ceil((expiry - Date.now()) / 60000);
+    if (remainingMins > 0) {
+      pausedChatsList.push({ chat, remainingMins });
+    }
+  }
+  
+  res.json({ 
+    connected: isConnected, 
+    hasQR: !!currentQR,
+    pausedChats: pausedChatsList
+  });
+});
+
+// Paused chats endpoint
+app.get('/paused', (req, res) => {
+  let pausedHtml = '';
+  let count = 0;
+  
+  for (const [chat, expiry] of pausedChats.entries()) {
+    const remainingMins = Math.ceil((expiry - Date.now()) / 60000);
+    if (remainingMins > 0) {
+      count++;
+      const phone = chat.replace('@s.whatsapp.net', '');
+      pausedHtml += `<div class="chat-item">📱 ${phone} <span class="time">${remainingMins} min remaining</span></div>`;
+    }
+  }
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Paused Chats - Ikamba Bot</title>
+        <meta http-equiv="refresh" content="30">
+        <style>
+          body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: linear-gradient(135deg, #25D366, #128C7E); }
+          .container { text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); max-width: 500px; width: 90%; }
+          h1 { color: #128C7E; }
+          .chat-item { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 10px; text-align: left; }
+          .time { float: right; color: #666; font-size: 12px; }
+          .count { font-size: 48px; color: #128C7E; font-weight: bold; }
+          .empty { color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>⏸️ Paused Chats</h1>
+          <div class="count">${count}</div>
+          ${count > 0 ? pausedHtml : '<p class="empty">No chats are currently paused</p>'}
+          <p style="color: #999; font-size: 12px; margin-top: 20px;">Send "..." in any chat to pause/resume</p>
+        </div>
+      </body>
+    </html>
+  `);
 });
 
 // Reset endpoint - clears auth and restarts QR flow
@@ -219,10 +281,14 @@ async function connectToWhatsApp() {
     } else if (connection === 'open') {
       isConnected = true;
       currentQR = null;
-      console.log('\n✅ Connected to WhatsApp!');
+      
+      // Get connected phone number
+      myNumber = sock.user?.id?.split(':')[0] || sock.user?.id?.split('@')[0];
+      console.log(`\n✅ Connected to WhatsApp as ${myNumber}!`);
       console.log('🤖 Ikamba AI Bot is now running...');
       console.log('📸 Image support: ENABLED');
-      console.log('🎨 Rich formatting: ENABLED\n');
+      console.log('🎨 Rich formatting: ENABLED');
+      console.log('⏸️  Send "..." to pause bot in any chat for 1 hour\n');
     }
   });
 
@@ -234,12 +300,57 @@ async function connectToWhatsApp() {
     if (type !== 'notify') return;
     
     for (const msg of messages) {
-      // Skip if not a new message or is from self
-      if (!msg.message || msg.key.fromMe) continue;
+      // Skip if not a new message
+      if (!msg.message) continue;
       
       // Get sender info
       const sender = msg.key.remoteJid;
       const isGroup = sender?.endsWith('@g.us');
+      const isFromMe = msg.key.fromMe;
+      
+      // Handle "..." command from bot owner to pause/resume chat
+      if (isFromMe) {
+        const messageText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+        
+        if (messageText.trim() === '...') {
+          // Toggle pause for this chat
+          if (pausedChats.has(sender)) {
+            // Resume the chat
+            pausedChats.delete(sender);
+            console.log(`▶️  Chat RESUMED: ${sender}`);
+            await sock.sendMessage(sender, { 
+              text: '▶️ *Bot resumed* - I\'ll respond to messages in this chat again.' 
+            });
+          } else {
+            // Pause the chat for 1 hour
+            const expiryTime = Date.now() + PAUSE_DURATION_MS;
+            pausedChats.set(sender, expiryTime);
+            console.log(`⏸️  Chat PAUSED for 1 hour: ${sender}`);
+            await sock.sendMessage(sender, { 
+              text: '⏸️ *Bot paused* - I won\'t respond in this chat for 1 hour.\nSend "..." again to resume.' 
+            });
+          }
+          continue;
+        }
+        
+        // Skip other messages from self
+        continue;
+      }
+      
+      // Check if chat is paused
+      if (pausedChats.has(sender)) {
+        const expiryTime = pausedChats.get(sender);
+        if (Date.now() < expiryTime) {
+          // Still paused, skip this message
+          const remainingMins = Math.ceil((expiryTime - Date.now()) / 60000);
+          console.log(`⏸️  Skipping message from paused chat ${sender} (${remainingMins} min remaining)`);
+          continue;
+        } else {
+          // Pause expired, remove from paused chats
+          pausedChats.delete(sender);
+          console.log(`▶️  Pause expired for ${sender}, resuming...`);
+        }
+      }
       
       // Skip group messages (optional - remove this to enable groups)
       if (isGroup) continue;
