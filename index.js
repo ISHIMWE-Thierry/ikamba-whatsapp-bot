@@ -308,34 +308,36 @@ async function connectToWhatsApp() {
       const isGroup = sender?.endsWith('@g.us');
       const isFromMe = msg.key.fromMe;
       
+      // Extract message text for command checking
+      const rawText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+      
+      // Debug log for all messages
+      console.log(`📨 Message received - From: ${sender}, FromMe: ${isFromMe}, Text: "${rawText.substring(0, 50)}"`);
+      
       // Handle "..." command from bot owner to pause/resume chat
-      if (isFromMe) {
-        const messageText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-        
-        if (messageText.trim() === '...') {
-          // Toggle pause for this chat
-          if (pausedChats.has(sender)) {
-            // Resume the chat
-            pausedChats.delete(sender);
-            console.log(`▶️  Chat RESUMED: ${sender}`);
-            await sock.sendMessage(sender, { 
-              text: '▶️ *Bot resumed* - I\'ll respond to messages in this chat again.' 
-            });
-          } else {
-            // Pause the chat for 1 hour
-            const expiryTime = Date.now() + PAUSE_DURATION_MS;
-            pausedChats.set(sender, expiryTime);
-            console.log(`⏸️  Chat PAUSED for 1 hour: ${sender}`);
-            await sock.sendMessage(sender, { 
-              text: '⏸️ *Bot paused* - I won\'t respond in this chat for 1 hour.\nSend "..." again to resume.' 
-            });
-          }
-          continue;
+      if (isFromMe && rawText.trim() === '...') {
+        // Toggle pause for this chat
+        if (pausedChats.has(sender)) {
+          // Resume the chat
+          pausedChats.delete(sender);
+          console.log(`▶️  Chat RESUMED: ${sender}`);
+          await sock.sendMessage(sender, { 
+            text: '▶️ *Bot resumed* - I\'ll respond to messages in this chat again.' 
+          });
+        } else {
+          // Pause the chat for 1 hour
+          const expiryTime = Date.now() + PAUSE_DURATION_MS;
+          pausedChats.set(sender, expiryTime);
+          console.log(`⏸️  Chat PAUSED for 1 hour: ${sender}`);
+          await sock.sendMessage(sender, { 
+            text: '⏸️ *Bot paused* - I won\'t respond in this chat for 1 hour.\nSend "..." again to resume.' 
+          });
         }
-        
-        // Skip other messages from self
         continue;
       }
+      
+      // Skip other messages from self
+      if (isFromMe) continue;
       
       // Check if chat is paused
       if (pausedChats.has(sender)) {
