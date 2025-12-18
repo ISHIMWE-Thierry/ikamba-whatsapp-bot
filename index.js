@@ -244,6 +244,8 @@ async function connectToWhatsApp() {
     printQRInTerminal: false,
     logger,
     browser: ['Ikamba AI', 'Chrome', '120.0.0'],
+    syncFullHistory: false,
+    getMessage: async () => undefined, // Required for some message types
   });
 
   // Handle connection updates
@@ -295,9 +297,10 @@ async function connectToWhatsApp() {
   // Save credentials on update
   sock.ev.on('creds.update', saveCreds);
 
-  // Handle incoming messages
+  // Handle ALL incoming messages (including from self)
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
+    // Process both 'notify' and 'append' types to catch self messages
+    console.log(`📬 Messages event type: ${type}, count: ${messages.length}`);
     
     for (const msg of messages) {
       // Skip if not a new message
@@ -312,10 +315,11 @@ async function connectToWhatsApp() {
       const rawText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
       
       // Debug log for all messages
-      console.log(`📨 Message received - From: ${sender}, FromMe: ${isFromMe}, Text: "${rawText.substring(0, 50)}"`);
+      console.log(`📨 Message - From: ${sender?.substring(0, 15)}..., FromMe: ${isFromMe}, Type: ${type}, Text: "${rawText.substring(0, 30)}"`);
       
       // Handle "..." command from bot owner to pause/resume chat
       if (isFromMe && rawText.trim() === '...') {
+        console.log(`🎯 PAUSE COMMAND DETECTED for chat: ${sender}`);
         // Toggle pause for this chat
         if (pausedChats.has(sender)) {
           // Resume the chat
@@ -338,6 +342,9 @@ async function connectToWhatsApp() {
       
       // Skip other messages from self
       if (isFromMe) continue;
+      
+      // Skip non-notify messages for AI responses
+      if (type !== 'notify') continue;
       
       // Check if chat is paused
       if (pausedChats.has(sender)) {
