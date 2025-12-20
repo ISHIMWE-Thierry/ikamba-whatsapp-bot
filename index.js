@@ -17,6 +17,13 @@ const IKAMBA_API_URL = process.env.IKAMBA_API_URL || 'https://hpersona.vercel.ap
 const PORT = process.env.PORT || 3000;
 const PAUSE_DURATION_MS = 60 * 60 * 1000; // 1 hour in milliseconds
 
+// 24/7 Connection settings
+const RECONNECT_INTERVAL_MS = 5000; // 5 seconds between reconnect attempts
+const MAX_RECONNECT_ATTEMPTS = 50; // Max attempts before waiting longer
+const LONG_RECONNECT_INTERVAL_MS = 60000; // 1 minute for long waits
+let reconnectAttempts = 0;
+let sock = null; // Global socket reference
+
 // Secret admin command to pause/resume (only you should know this)
 const PAUSE_COMMAND = process.env.PAUSE_COMMAND || '/ikambapause';
 
@@ -240,8 +247,8 @@ async function connectToWhatsApp() {
   // Get latest Baileys version
   const { version } = await fetchLatestBaileysVersion();
   
-  // Create socket connection
-  const sock = makeWASocket({
+  // Create socket connection with 24/7 settings
+  sock = makeWASocket({
     version,
     auth: state,
     printQRInTerminal: false,
@@ -249,6 +256,12 @@ async function connectToWhatsApp() {
     browser: ['Ikamba AI', 'Chrome', '120.0.0'],
     syncFullHistory: false,
     getMessage: async () => undefined, // Required for some message types
+    // 24/7 connection settings
+    connectTimeoutMs: 60000, // 60 seconds timeout
+    defaultQueryTimeoutMs: 60000,
+    keepAliveIntervalMs: 25000, // Send keep-alive every 25 seconds
+    retryRequestDelayMs: 500,
+    markOnlineOnConnect: true,
   });
 
   // Handle connection updates
@@ -273,27 +286,51 @@ async function connectToWhatsApp() {
     if (connection === 'close') {
       isConnected = false;
       currentQR = null;
-      const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
       
-      console.log('Connection closed due to', lastDisconnect?.error?.message || 'unknown reason');
+      const statusCode = (lastDisconnect?.error instanceof Boom) 
+        ? lastDisconnect.error.output?.statusCode 
+        : null;
+      
+      const reason = lastDisconnect?.error?.message || 'unknown reason';
+      console.log(`Connection closed: ${reason} (code: ${statusCode})`);
+      
+      // Check if we should reconnect
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       
       if (shouldReconnect) {
-        console.log('Reconnecting...');
-        connectToWhatsApp();
+        reconnectAttempts++;
+        
+        // Calculate delay based on attempts
+        let delay = RECONNECT_INTERVAL_MS;
+        if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+          delay = LONG_RECONNECT_INTERVAL_MS;
+          console.log(`⏳ Too many attempts (${reconnectAttempts}), waiting ${delay/1000}s before reconnecting...`);
+        } else {
+          console.log(`🔄 Reconnecting in ${delay/1000}s... (attempt ${reconnectAttempts})`);
+        }
+        
+        // Wait and reconnect
+        setTimeout(() => {
+          console.log('🔌 Attempting to reconnect...');
+          connectToWhatsApp();
+        }, delay);
       } else {
-        console.log('Logged out. Delete auth_info folder and restart to re-login.');
+        console.log('❌ Logged out. Delete auth_info folder and restart to re-login.');
+        // Don't exit - wait for manual intervention
       }
     } else if (connection === 'open') {
       isConnected = true;
       currentQR = null;
+      reconnectAttempts = 0; // Reset counter on successful connection
       
       // Get connected phone number
       myNumber = sock.user?.id?.split(':')[0] || sock.user?.id?.split('@')[0];
       console.log(`\n✅ Connected to WhatsApp as ${myNumber}!`);
-      console.log('🤖 Ikamba AI Bot is now running...');
+      console.log('🤖 Ikamba AI Bot is now running 24/7...');
       console.log('📸 Image support: ENABLED');
       console.log('🎨 Rich formatting: ENABLED');
-      console.log('⏸️  Send "..." to pause bot in any chat for 1 hour\n');
+      console.log('⏸️  Send "..." to pause bot in any chat for 1 hour');
+      console.log('🔄 Auto-reconnect: ENABLED\n');
     }
   });
 
@@ -692,6 +729,69 @@ IMPORTANT:
   }
 }
 
+// Health check - logs status every 5 minutes
+function startHealthCheck() {
+  setInterval(() => {
+    const status = isConnected ? '✅ Connected' : '❌ Disconnected';
+    const uptime = Math.floor(process.uptime() / 60);
+    console.log(`[Health Check] ${status} | Uptime: ${uptime} minutes | Reconnect attempts: ${reconnectAttempts}`);
+    
+    // Clean up expired paused chats
+    const now = Date.now();
+    for (const [chat, expiry] of pausedChats.entries()) {
+      if (expiry < now) {
+        pausedChats.delete(chat);
+        console.log(`[Pause] Removed expired pause for ${chat}`);
+      }
+    }
+  }, 5 * 60 * 1000); // Every 5 minutes
+}
+
+// Handle process signals for graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+  if (sock) {
+    sock.end();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+  if (sock) {
+    sock.end();
+  }
+  process.exit(0);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught exception:', error);
+  // Don't exit - try to keep running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled rejection at:', promise, 'reason:', reason);
+  // Don't exit - try to keep running
+});
+
 // Start the bot
-console.log('🚀 Starting Ikamba AI WhatsApp Bot...\n');
-connectToWhatsApp().catch(console.error);
+console.log('🚀 Starting Ikamba AI WhatsApp Bot (24/7 Mode)...\n');
+console.log('📋 Features:');
+console.log('   • Auto-reconnect on disconnection');
+console.log('   • Keep-alive heartbeat every 25 seconds');
+console.log('   • Health check logging every 5 minutes');
+console.log('   • Graceful error handling');
+console.log('');
+
+// Start health check
+startHealthCheck();
+
+// Connect to WhatsApp
+connectToWhatsApp().catch((error) => {
+  console.error('❌ Failed to start bot:', error);
+  console.log('🔄 Retrying in 10 seconds...');
+  setTimeout(() => {
+    connectToWhatsApp().catch(console.error);
+  }, 10000);
+});
