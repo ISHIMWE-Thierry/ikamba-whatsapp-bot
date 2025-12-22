@@ -416,6 +416,9 @@ async function connectToWhatsApp() {
       // Get or create conversation context
       let context = conversationContexts.get(sender) || [];
       
+      // Check if this is a NEW conversation (first message from this user)
+      const isNewConversation = context.length === 0;
+      
       // Build message content with image support
       let userContent = messageText || '';
       let imageDataUrl = null;
@@ -447,11 +450,66 @@ async function connectToWhatsApp() {
         // Show typing indicator
         await sock.sendPresenceUpdate('composing', sender);
         
+        // Send welcome message for NEW conversations
+        if (isNewConversation) {
+          const welcomeMessage = `👋 *Hello! I'm Ikamba AI Assistant*
+
+I'm here to help you with:
+💸 Send money to Africa (Rwanda, Uganda, Kenya, etc.)
+📊 Check exchange rates
+📋 Track your transfers
+🧾 Get transfer receipts/proofs
+
+How can I help you today?`;
+          
+          await sock.sendMessage(sender, { text: welcomeMessage });
+          console.log(`👋 Sent welcome message to new user: ${sender}`);
+          
+          // Small delay before processing their actual message
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
         // Call Ikamba AI with image data
         const aiResponse = await callIkambaAI(context, sender, hasImage, imageDataUrl);
         
-        // Format the response for WhatsApp
-        const formattedResponse = formatForWhatsApp(aiResponse);
+        // Check if AI response contains a proof image to send
+        const proofImageMatch = aiResponse.match(/\[\[PROOF_IMAGE:(https?:\/\/[^\]]+)\]\]/);
+        
+        if (proofImageMatch) {
+          // Extract the image URL
+          const imageUrl = proofImageMatch[1];
+          console.log(`📸 Sending transfer proof image: ${imageUrl}`);
+          
+          // Remove the proof image tag from text response
+          const textResponse = formatForWhatsApp(aiResponse.replace(/\[\[PROOF_IMAGE:[^\]]+\]\]/g, '').trim());
+          
+          // Send the text message first (if any)
+          if (textResponse && textResponse.length > 0) {
+            await sock.sendMessage(sender, { text: textResponse });
+          }
+          
+          // Send the image
+          try {
+            await sock.sendMessage(sender, {
+              image: { url: imageUrl },
+              caption: '📋 Transfer Proof / Доказательство перевода'
+            });
+            console.log(`📤 Sent proof image to ${sender}`);
+          } catch (imgError) {
+            console.error('Failed to send image:', imgError);
+            // Fallback: send URL as text
+            await sock.sendMessage(sender, { 
+              text: `📋 Transfer Proof: ${imageUrl}` 
+            });
+          }
+        } else {
+          // Format the response for WhatsApp (no image)
+          const formattedResponse = formatForWhatsApp(aiResponse);
+          
+          // Send response
+          await sock.sendMessage(sender, { text: formattedResponse });
+          console.log(`📤 Replied to ${sender}`);
+        }
         
         // Add AI response to context
         context.push({
@@ -461,10 +519,6 @@ async function connectToWhatsApp() {
         
         // Save context
         conversationContexts.set(sender, context);
-        
-        // Send response
-        await sock.sendMessage(sender, { text: formattedResponse });
-        console.log(`📤 Replied to ${sender}`);
         
       } catch (error) {
         console.error('Error processing message:', error);
@@ -610,32 +664,39 @@ async function callIkambaAI(messages, userId, hasImage = false, currentImageUrl 
     const formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : `+${cleanPhone}`;
     
     // Style instructions - talk like Thierry (casual, mixed languages, friendly)
-    const styleHint = `YOU ARE THIERRY - NOT AN AI. Talk like a real person chatting with a friend on WhatsApp.
+    const styleHint = `You are Ikamba AI - a friendly customer support assistant for Ikamba Remit money transfers.
 
-PERSONALITY:
-- You're Thierry, a friendly Rwandan guy helping people send money
-- Mix Kinyarwanda, English, and French naturally like real Rwandans do
-- Keep messages SHORT (5-15 words max unless giving transfer details)
-- Use casual greetings: "Yooo", "Eh boss", "Muraho neza", "Wapi", "Bite"
-- Common phrases: "ushaka iki?", "ni byiza", "komeza", "murakoze", "ese?", "nta kibazo", "c'est bon"
+LANGUAGE RULES (CRITICAL):
+- DEFAULT LANGUAGE IS ENGLISH - always respond in English first
+- ONLY switch to another language if the user CLEARLY writes in that language
+- If user writes in Russian → respond in Russian
+- If user writes in French → respond in French  
+- If user writes in Kinyarwanda → respond in Kinyarwanda
+- For technical terms (transaction ID, amounts, status), ALWAYS use English
+
+RESPONSE STYLE:
+- Be friendly, helpful and conversational
+- Keep messages SHORT (1-3 sentences for simple questions)
 - Use emojis naturally but not too many
-- NEVER say "I'm an AI" or "As an assistant"
-- Sound human, make typos sometimes, use "haha" or "😂"
+- Sound human and approachable
 
-EXAMPLES:
-- Greeting: "Yooo! Bite? Ushaka kohereza amafaranga?" 
-- Rate quote: "10k RUB = 145k RWF 🔥 ni byiza?"
-- Confirming: "Nice! Ukohereza kuri nde?"
-- Payment: "Murakoze! Screenshot yohereze hano 📸"
-- Success: "Done bro! Amafaranga yagiye ✅"
+GREETING RULES:
+- "hi" or "hello" → "Hey! 👋 How can I help you?"
+- "thanks" or "thank you" → "You're welcome! 😊"
+- "bye" → "Goodbye! Take care! �"
+
+TRANSFER PROOF:
+- If user asks for proof/receipt/confirmation of a transfer → call get_transfer_proof
+- When you have a transferProofUrl, output: [[PROOF_IMAGE:URL]] to send the image
+- Example: "Here's your transfer proof! [[PROOF_IMAGE:https://storage.googleapis.com/...]]"
 
 WHATSAPP VERIFICATION FLOW:
 If the user is NOT verified (check WHATSAPP USER STATUS in context):
-1. When they want to send money, first ask for their email: "Mbere yo kohereza, nkeneye email yawe. Ni iyihe?"
+1. When they want to send money, first ask for their email
 2. Call request_whatsapp_verification function with their email
-3. Tell them: "Code noherereje kuri [their email]! Check email unyoherereze code ya 6 digits 🔐"
+3. Tell them a verification code was sent to their email
 4. When they send the code, call verify_whatsapp_code function
-5. If verified: "Nice! Ubu ushobora kohereza amafaranga 💪 Ushaka kohereza angahe?"
+5. If verified, proceed with the transfer
 
 If user is VERIFIED:
 - Proceed normally with transfer
