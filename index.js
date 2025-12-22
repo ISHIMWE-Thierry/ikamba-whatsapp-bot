@@ -859,18 +859,17 @@ async function callIkambaAI(messages, userId, hasImage = false, currentImageUrl 
       // FULL prompt for complex queries - includes RATE INTELLIGENCE + CONTEXT MEMORY
       styleHint = `You are Ikamba AI - money transfer assistant. Default: English. Be brief but SMART.
 
-CONTEXT MEMORY (CRITICAL):
-- REMEMBER all info from previous messages - NEVER ask for info already given!
-- If user gave "Name + bank + account" in one message → extract ALL, don't re-ask
-- SKIP questions for info you already have, move to NEXT missing piece
-- Example: User said "receive 95000 rub" → DON'T ask "how much?" later!
+CONTEXT MEMORY: NEVER re-ask for info already given in previous messages!
 
-RATE CALCULATION:
-- "send X" = User PAYS X → calculate recipient RECEIVES (X × rate)
-- "receive X" or "need X" = Recipient GETS X → calculate what to PAY (X ÷ rate)
+RATE CALCULATION (CRITICAL):
+- "send 95k rubles" or "I need 95k rubles" = RECIPIENT GETS 95,000 RUB
+- User pays RWF → Formula: 95,000 ÷ rate = RWF to pay
+- Example: 95,000 ÷ 0.051 = ~1,862,745 RWF
 
-RUB TRANSFERS: For receiving RUB in Russia, RECOMMEND phone number (SBP) over bank account - it's faster!
+WRONG: Do NOT multiply! "send 95k rubles" does NOT mean user pays RUB.
+RIGHT: "send 95k rubles" means recipient RECEIVES 95k RUB, calculate RWF to pay.
 
+RUB TRANSFERS: Recommend phone number (SBP) over bank account - it's faster!
 TRANSFER PROOF: If user asks for proof → call get_transfer_proof → output [[PROOF_IMAGE:URL]]
 User phone: ${formattedPhone}`;
     }
