@@ -81,14 +81,19 @@ const COMPLEX_PATTERNS = [
   /[a-zA-Z0-9]{15,}/,             // Transaction ID (long alphanumeric)
   /отправить|перевести|перевод/i,  // Russian transfer words
   /kohereza/i,                     // Kinyarwanda transfer word
+  // RATE CALCULATIONS - need smart understanding
+  /i\s+(need|want|have)/i,         // "I need 95k rubles", "I have RWF"
+  /\d+k?\s*(rub|rwf|usd|eur|ugx|kes|tzs)/i,  // Amount + currency
+  /how\s+much.*to\s+(send|pay|get|receive)/i, // "how much to pay"
+  /to\s+(get|receive)\s+\d+/i,     // "to get 95000 RUB"
 ];
 
 // Patterns for SIMPLE AI queries (use GPT-4o-mini - cheaper)
 const SIMPLE_PATTERNS = [
-  /rate|курс|exchange/i,           // Rate queries
-  /how much|сколько/i,             // Simple calculations
+  /^rate$/i,                       // Just "rate" alone
   /what.*currency/i,               // Currency info
   /which.*country/i,               // Country info
+  /support.*country/i,             // Supported countries
 ];
 
 // Check if message matches instant response
@@ -850,8 +855,15 @@ async function callIkambaAI(messages, userId, hasImage = false, currentImageUrl 
       // MINIMAL prompt for simple queries (saves tokens!)
       styleHint = `Ikamba AI - helpful money transfer assistant. Be BRIEF (1-2 sentences). Default: English. User phone: ${formattedPhone}`;
     } else {
-      // FULL prompt for complex queries
-      styleHint = `You are Ikamba AI - money transfer assistant. Default: English. Be brief.
+      // FULL prompt for complex queries - includes RATE INTELLIGENCE
+      styleHint = `You are Ikamba AI - money transfer assistant. Default: English. Be brief but SMART.
+
+RATE CALCULATION INTELLIGENCE (CRITICAL):
+- "send X" = User PAYS X, calculate what recipient RECEIVES (X × rate)
+- "I need X" or "get X" or "receive X" = User wants RECIPIENT to GET X, calculate what to PAY (X ÷ rate)
+- "I have [currency]" = Currency user will PAY WITH
+- If ambiguous, ASK: "Do you want to SEND X or want recipient to RECEIVE X?"
+
 TRANSFER PROOF: If user asks for proof → call get_transfer_proof → output [[PROOF_IMAGE:URL]]
 VERIFICATION: Unverified users must verify email first before transfers.
 User phone: ${formattedPhone}`;
