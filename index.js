@@ -33,6 +33,144 @@ const conversationContexts = new Map();
 // Store paused chats with expiry time
 const pausedChats = new Map();
 
+// ============================================
+// COST OPTIMIZATION: Response caching
+// ============================================
+const responseCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache
+
+// Simple pattern matching for instant responses (NO API call needed)
+const INSTANT_RESPONSES = {
+  // Greetings
+  'hi': 'Hey! 👋 How can I help you today?',
+  'hello': 'Hello! 👋 How can I help you?',
+  'hey': 'Hey! 👋 What can I do for you?',
+  'hola': '¡Hola! 👋 ¿En qué puedo ayudarte?',
+  'bonjour': 'Bonjour! 👋 Comment puis-je vous aider?',
+  'привет': 'Привет! 👋 Чем могу помочь?',
+  'muraho': 'Muraho! 👋 Nakwigisha iki?',
+  
+  // Thanks
+  'thanks': 'You\'re welcome! 😊',
+  'thank you': 'You\'re welcome! Happy to help! 😊',
+  'thx': 'You\'re welcome! 😊',
+  'merci': 'De rien! 😊',
+  'спасибо': 'Пожалуйста! 😊',
+  'murakoze': 'Nta kibazo! 😊',
+  
+  // Bye
+  'bye': 'Goodbye! Take care! 👋',
+  'goodbye': 'Goodbye! Have a great day! 👋',
+  'ciao': 'Ciao! 👋',
+  
+  // Common questions
+  'who are you': 'I\'m Ikamba AI Assistant! 🤖 I help with money transfers to Africa (Rwanda, Uganda, Kenya, etc.), check rates, and track your transfers.',
+  'what can you do': 'I can help you:\n💸 Send money to Africa\n📊 Check exchange rates\n📋 Track transfers\n🧾 Get transfer proofs\n\nJust tell me what you need!',
+  'help': 'I\'m here to help! I can:\n💸 Send money to Africa\n📊 Check rates\n📋 Track transfers\n\nTry: "send 100 USD to Rwanda" or "what\'s the rate for RUB to RWF?"',
+};
+
+// Patterns that need FULL AI (expensive - use GPT-4o)
+const COMPLEX_PATTERNS = [
+  /send\s+\d+/i,                    // Money transfer
+  /transfer\s+\d+/i,               // Money transfer
+  /pay\s+\d+/i,                    // Payment
+  /my\s+(order|transaction|transfer)/i,  // Order lookup
+  /status\s+of/i,                  // Status check
+  /proof|receipt|screenshot/i,     // Proof request
+  /check.*transaction/i,           // Transaction check
+  /[a-zA-Z0-9]{15,}/,             // Transaction ID (long alphanumeric)
+  /отправить|перевести|перевод/i,  // Russian transfer words
+  /kohereza/i,                     // Kinyarwanda transfer word
+];
+
+// Patterns for SIMPLE AI queries (use GPT-4o-mini - cheaper)
+const SIMPLE_PATTERNS = [
+  /rate|курс|exchange/i,           // Rate queries
+  /how much|сколько/i,             // Simple calculations
+  /what.*currency/i,               // Currency info
+  /which.*country/i,               // Country info
+];
+
+// Check if message matches instant response
+function getInstantResponse(text) {
+  if (!text) return null;
+  const normalized = text.toLowerCase().trim();
+  
+  // Direct match
+  if (INSTANT_RESPONSES[normalized]) {
+    return INSTANT_RESPONSES[normalized];
+  }
+  
+  // Partial match for greetings
+  for (const [pattern, response] of Object.entries(INSTANT_RESPONSES)) {
+    if (normalized === pattern || normalized.startsWith(pattern + ' ') || normalized.startsWith(pattern + '!')) {
+      return response;
+    }
+  }
+  
+  return null;
+}
+
+// Determine query complexity for model selection
+function getQueryComplexity(text) {
+  if (!text) return 'simple';
+  
+  // Check for complex patterns first
+  for (const pattern of COMPLEX_PATTERNS) {
+    if (pattern.test(text)) {
+      return 'complex';
+    }
+  }
+  
+  // Check for simple patterns
+  for (const pattern of SIMPLE_PATTERNS) {
+    if (pattern.test(text)) {
+      return 'simple';
+    }
+  }
+  
+  // Default to simple for short messages
+  return text.length < 50 ? 'simple' : 'complex';
+}
+
+// Cache key generator
+function getCacheKey(text, userId) {
+  // Only cache rate queries and general info
+  const normalized = text.toLowerCase().trim();
+  if (/rate|курс|exchange|how much.*to/i.test(normalized)) {
+    return `rate:${normalized}`;
+  }
+  return null; // Don't cache personalized queries
+}
+
+// Get cached response
+function getCachedResponse(cacheKey) {
+  if (!cacheKey) return null;
+  const cached = responseCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    console.log(`💰 Cache HIT: ${cacheKey}`);
+    return cached.response;
+  }
+  return null;
+}
+
+// Set cached response
+function setCachedResponse(cacheKey, response) {
+  if (!cacheKey) return;
+  responseCache.set(cacheKey, { response, timestamp: Date.now() });
+  console.log(`💾 Cached: ${cacheKey}`);
+  
+  // Clean old cache entries periodically
+  if (responseCache.size > 100) {
+    const now = Date.now();
+    for (const [key, value] of responseCache.entries()) {
+      if (now - value.timestamp > CACHE_TTL_MS) {
+        responseCache.delete(key);
+      }
+    }
+  }
+}
+
 // Your WhatsApp number (will be detected automatically)
 let myNumber = null;
 
@@ -419,6 +557,36 @@ async function connectToWhatsApp() {
       // Check if this is a NEW conversation (first message from this user)
       const isNewConversation = context.length === 0;
       
+      // ============================================
+      // COST OPTIMIZATION: Check for instant response first
+      // ============================================
+      const instantResponse = getInstantResponse(messageText);
+      if (instantResponse && !hasImage) {
+        console.log(`⚡ INSTANT response (no API call): "${messageText}"`);
+        await sock.sendMessage(sender, { text: instantResponse });
+        
+        // Still add to context for continuity
+        context.push({ role: 'user', content: messageText });
+        context.push({ role: 'assistant', content: instantResponse });
+        conversationContexts.set(sender, context.slice(-10)); // Keep less context for simple exchanges
+        continue;
+      }
+      
+      // ============================================
+      // COST OPTIMIZATION: Check cache for rate queries
+      // ============================================
+      const cacheKey = getCacheKey(messageText, sender);
+      const cachedResponse = getCachedResponse(cacheKey);
+      if (cachedResponse && !hasImage) {
+        console.log(`💰 CACHED response (no API call): "${messageText}"`);
+        await sock.sendMessage(sender, { text: formatForWhatsApp(cachedResponse) });
+        
+        context.push({ role: 'user', content: messageText });
+        context.push({ role: 'assistant', content: cachedResponse });
+        conversationContexts.set(sender, context.slice(-10));
+        continue;
+      }
+      
       // Build message content with image support
       let userContent = messageText || '';
       let imageDataUrl = null;
@@ -441,9 +609,13 @@ async function connectToWhatsApp() {
         imageUrl: imageDataUrl, // Store the actual image data URL
       });
       
-      // Keep only last 20 messages
-      if (context.length > 20) {
-        context = context.slice(-20);
+      // ============================================
+      // COST OPTIMIZATION: Limit context based on complexity
+      // ============================================
+      const complexity = getQueryComplexity(messageText);
+      const maxContext = complexity === 'complex' ? 12 : 6; // Less context for simple queries
+      if (context.length > maxContext) {
+        context = context.slice(-maxContext);
       }
       
       try {
@@ -469,8 +641,14 @@ How can I help you today?`;
           await new Promise(resolve => setTimeout(resolve, 500));
         }
         
-        // Call Ikamba AI with image data
-        const aiResponse = await callIkambaAI(context, sender, hasImage, imageDataUrl);
+        // Call Ikamba AI with image data AND complexity hint
+        console.log(`🤖 API call (${complexity}): "${messageText?.substring(0, 50)}..."`);
+        const aiResponse = await callIkambaAI(context, sender, hasImage, imageDataUrl, complexity);
+        
+        // Cache the response if applicable
+        if (cacheKey && !hasImage) {
+          setCachedResponse(cacheKey, aiResponse);
+        }
         
         // Check if AI response contains a proof image to send
         const proofImageMatch = aiResponse.match(/\[\[PROOF_IMAGE:(https?:\/\/[^\]]+)\]\]/);
@@ -656,55 +834,28 @@ function formatForWhatsApp(text) {
 }
 
 // Call Ikamba AI API
-async function callIkambaAI(messages, userId, hasImage = false, currentImageUrl = null) {
+async function callIkambaAI(messages, userId, hasImage = false, currentImageUrl = null, complexity = 'complex') {
   try {
     // Clean up WhatsApp JID to get just the phone number
     // Format: 250788123456@s.whatsapp.net → 250788123456
     const cleanPhone = userId.replace('@s.whatsapp.net', '').replace('@g.us', '');
     const formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : `+${cleanPhone}`;
     
-    // Style instructions - talk like Thierry (casual, mixed languages, friendly)
-    const styleHint = `You are Ikamba AI - a friendly customer support assistant for Ikamba Remit money transfers.
-
-LANGUAGE RULES (CRITICAL):
-- DEFAULT LANGUAGE IS ENGLISH - always respond in English first
-- ONLY switch to another language if the user CLEARLY writes in that language
-- If user writes in Russian → respond in Russian
-- If user writes in French → respond in French  
-- If user writes in Kinyarwanda → respond in Kinyarwanda
-- For technical terms (transaction ID, amounts, status), ALWAYS use English
-
-RESPONSE STYLE:
-- Be friendly, helpful and conversational
-- Keep messages SHORT (1-3 sentences for simple questions)
-- Use emojis naturally but not too many
-- Sound human and approachable
-
-GREETING RULES:
-- "hi" or "hello" → "Hey! 👋 How can I help you?"
-- "thanks" or "thank you" → "You're welcome! 😊"
-- "bye" → "Goodbye! Take care! �"
-
-TRANSFER PROOF:
-- If user asks for proof/receipt/confirmation of a transfer → call get_transfer_proof
-- When you have a transferProofUrl, output: [[PROOF_IMAGE:URL]] to send the image
-- Example: "Here's your transfer proof! [[PROOF_IMAGE:https://storage.googleapis.com/...]]"
-
-WHATSAPP VERIFICATION FLOW:
-If the user is NOT verified (check WHATSAPP USER STATUS in context):
-1. When they want to send money, first ask for their email
-2. Call request_whatsapp_verification function with their email
-3. Tell them a verification code was sent to their email
-4. When they send the code, call verify_whatsapp_code function
-5. If verified, proceed with the transfer
-
-If user is VERIFIED:
-- Proceed normally with transfer
-- Use their linked account info
-
-IMPORTANT:
-- User's WhatsApp phone is ${formattedPhone} - use this for verification and orders
-- DO NOT create orders for unverified users - verify first!`;
+    // ============================================
+    // COST OPTIMIZATION: Use shorter prompts for simple queries
+    // ============================================
+    let styleHint;
+    
+    if (complexity === 'simple') {
+      // MINIMAL prompt for simple queries (saves tokens!)
+      styleHint = `Ikamba AI - helpful money transfer assistant. Be BRIEF (1-2 sentences). Default: English. User phone: ${formattedPhone}`;
+    } else {
+      // FULL prompt for complex queries
+      styleHint = `You are Ikamba AI - money transfer assistant. Default: English. Be brief.
+TRANSFER PROOF: If user asks for proof → call get_transfer_proof → output [[PROOF_IMAGE:URL]]
+VERIFICATION: Unverified users must verify email first before transfers.
+User phone: ${formattedPhone}`;
+    }
 
     // Add context about image if present
     const imageHint = hasImage 
