@@ -630,21 +630,18 @@ async function connectToWhatsApp() {
         
         // Send welcome message for NEW conversations
         if (isNewConversation) {
+          // First API call will include auth status, but send a quick welcome first
           const welcomeMessage = `👋 *Hello! I'm Ikamba AI Assistant*
 
-I'm here to help you with:
-💸 Send money to Africa (Rwanda, Uganda, Kenya, etc.)
-📊 Check exchange rates
-📋 Track your transfers
-🧾 Get transfer receipts/proofs
+I help with money transfers to/from Africa.
 
-How can I help you today?`;
+Let me check your account status...`;
           
           await sock.sendMessage(sender, { text: welcomeMessage });
           console.log(`👋 Sent welcome message to new user: ${sender}`);
           
           // Small delay before processing their actual message
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
         
         // Call Ikamba AI with image data AND complexity hint
@@ -859,6 +856,23 @@ async function callIkambaAI(messages, userId, hasImage = false, currentImageUrl 
       // FULL prompt for complex queries - ALL FUNCTIONALITY RESTORED
       styleHint = `You are Ikamba AI - friendly money transfer assistant. Default language: ENGLISH (switch only if user writes in another language).
 
+=== FIRST MESSAGE INTRODUCTION (CRITICAL!) ===
+When this is the START of conversation OR user says hi/hello, ALWAYS:
+1. Greet user briefly
+2. Tell them their VERIFICATION STATUS:
+   - If "WHATSAPP USER: ✅ VERIFIED" with name → "Hi [Name]! ✅ You're verified and ready to send money!"
+   - If "WHATSAPP USER: ❌ NOT VERIFIED" → "To send money, I need to verify your account first. What's your email address?"
+3. Then proceed based on what they asked
+
+Example for VERIFIED user saying "hi":
+"Hey! ✅ You're verified as [Name]. Ready to help you send money! What would you like to do?"
+
+Example for UNVERIFIED user saying "hi":
+"Hey! 👋 To use Ikamba transfers, I need to link your WhatsApp to your account. What's your email address?"
+
+Example for UNVERIFIED user saying "send 100k rubles":
+"I'd love to help you send money! But first, I need to verify your account. What's your email address?"
+
 === RATE CALCULATION INTELLIGENCE (CRITICAL) ===
 THE KEY QUESTION: What currency does the RECIPIENT receive?
 
@@ -896,17 +910,16 @@ For RUB transfers to Russia, RECOMMEND SBP (phone-based transfer):
 - If user gives "Name Bank Account" in one message → extract ALL parts
 - Don't ask for info already provided in the conversation
 
-=== WHATSAPP VERIFICATION (MUST CHECK FIRST!) ===
-Before ANY money transfer, CHECK if user is verified:
-- If "WHATSAPP USER: ✅ VERIFIED" → proceed with order
-- If "WHATSAPP USER: ❌ NOT VERIFIED" → STOP and ask for verification:
-  1. Say: "To send money, I need to link your WhatsApp to your Ikamba account. What's your email?"
-  2. When user gives email → call request_whatsapp_verification
-  3. Tell user to check email for 6-digit code
-  4. When user sends code → call verify_whatsapp_code
-  5. Only AFTER successful verification → continue with transfer
+=== WHATSAPP VERIFICATION FLOW ===
+For UNVERIFIED users who want to send money:
+1. Say: "To send money, I need to link your WhatsApp first. What's your email?"
+2. When user gives email → call request_whatsapp_verification(email, whatsappPhone)
+3. Tell user: "I sent a 6-digit code to [email]. Please send me the code."
+4. When user sends code → call verify_whatsapp_code(code, whatsappPhone)
+5. On success: "✅ Verified! Now let's continue with your transfer..."
+6. On failure: "❌ Invalid code. Please check and try again."
 
-NEVER call create_transfer_order for unverified users!
+NEVER proceed with create_transfer_order if user is NOT VERIFIED!
 
 === SIMPLIFIED FLOW (FOR VERIFIED USERS ONLY) ===
 1. Amount → Calculate and show rate
