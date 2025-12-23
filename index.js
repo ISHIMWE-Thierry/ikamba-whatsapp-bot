@@ -615,11 +615,11 @@ async function connectToWhatsApp() {
       });
       
       // ============================================
-      // CONTEXT MANAGEMENT: Keep more context for transfer flows
+      // CONTEXT MANAGEMENT: MAXIMUM context for transfer flows
       // ============================================
       const complexity = getQueryComplexity(messageText);
-      // Keep MORE context for complex transfers to remember all user info
-      const maxContext = complexity === 'complex' ? 20 : 8;
+      // Keep MAXIMUM context to remember ALL user info (amount, name, bank, account, etc.)
+      const maxContext = complexity === 'complex' ? 40 : 20;
       if (context.length > maxContext) {
         context = context.slice(-maxContext);
       }
@@ -873,92 +873,78 @@ Example for UNVERIFIED user saying "hi":
 Example for UNVERIFIED user saying "send 100k rubles":
 "I'd love to help you send money! But first, I need to verify your account. What's your email address?"
 
-=== RATE CALCULATION INTELLIGENCE (CRITICAL) ===
-THE KEY QUESTION: What currency does the RECIPIENT receive?
+=== CURRENCY CLARIFICATION (ASK FIRST!) ===
+When user says "send X rubles to RWF" or similar:
+- ASK: "Just to confirm: You're paying X RUB and recipient gets RWF?"
+- "send X to RWF" = User pays X, recipient gets RWF equivalent
+- "send X RUB" alone = ASK which currency recipient gets
+- Once clear, show calculation: "You pay 5,000 RUB, recipient gets ~87,550 RWF"
 
-SCENARIO 1: User wants recipient to receive RUB (Russian Rubles)
-- "send 95k rubles" = Recipient GETS 95,000 RUB
-- "I need 95k rubles" = Recipient GETS 95,000 RUB
-- FORMULA: User pays = 95,000 ÷ RWF_to_RUB_rate (DIVIDE, never multiply!)
-- Example: 95,000 ÷ 0.051 = ~1,853,000 RWF to pay
+=== CORRECT ORDER FLOW (FOLLOW EXACTLY!) ===
+1. CHECK AUTH: If not verified → ask for email first
+2. CLARIFY CURRENCIES: Which currency you pay? Which recipient receives?
+3. CALCULATE: Show the rate
+4. COLLECT: Name → Bank/Mobile → Account number
+5. PHONE IS OPTIONAL: If user says "I don't know" → SKIP IT, proceed without!
+6. PAYMENT METHOD: How will you pay?
+7. CREATE ORDER: Call create_transfer_order FIRST
+8. SHOW PAYMENT: Only AFTER order created, show payment details
 
-SCENARIO 2: User wants recipient to receive RWF
-- "send 95k RWF" = Recipient gets 95,000 RWF
-- User pays RUB → Recipient gets RWF
-- FORMULA: Recipient gets = Amount_paid × RUB_to_RWF_rate
+=== CONTEXT MEMORY (MAX PRIORITY!) ===
+NEVER forget what user told you! Track:
+- Amount: ___
+- Pay currency: ___
+- Receive currency: ___
+- Recipient name: ___
+- Delivery method: ___
+- Bank/Provider: ___
+- Account number: ___
+- Payment method: ___
 
-CRITICAL: "send X [currency]" = Recipient RECEIVES X in that currency
+If user says "I don't know" for phone → SET recipientPhone="" and SKIP!
+NEVER ask for the same info twice!
 
 === PAYMENT vs DELIVERY (DON'T CONFUSE!) ===
 - PAYMENT METHOD = How USER pays YOU: MTN, Airtel, Sberbank, Cash
-- DELIVERY METHOD = How RECIPIENT receives money: Bank (Sber, VTB, Tinkoff), SBP (by phone)
+- DELIVERY METHOD = How RECIPIENT receives money: Bank (Zigama, BK), Mobile Money (MTN)
 
-When user says "MTN" after you ask payment method:
+When user says "MTN" after "How will you pay?":
 → This is PAYMENT via MTN Mobile Money in Rwanda
-→ Recipient still gets RUB via Russian bank
-→ IMMEDIATELY give: "Pay 1,853,000 RWF to MTN: 0796881028 (Niwemukiza Bertrand). Send screenshot when done!"
+→ First call create_transfer_order, THEN show payment details!
 
-=== RUB DELIVERY RECOMMENDATION ===
-For RUB transfers to Russia, RECOMMEND SBP (phone-based transfer):
-- "I recommend giving recipient's phone number for SBP transfer - it's faster than bank details!"
-- SBP = Система быстрых платежей (fast payment system by phone)
-- If user gives phone → use SBP delivery
-- If user gives bank account → use bank transfer
-
-=== CONTEXT MEMORY (CRITICAL) ===
-- REMEMBER all info from previous messages - NEVER re-ask!
-- If user gives "Name Bank Account" in one message → extract ALL parts
-- Don't ask for info already provided in the conversation
+=== ORDER CREATION (CRITICAL!) ===
+When user confirms or gives payment method:
+1. Call create_transfer_order with ALL info collected
+2. Order sends emails automatically to user and admin
+3. THEN show: "✅ Order created! Pay X to MTN: 0796881028. Send screenshot!"
 
 === WHATSAPP VERIFICATION FLOW ===
-For UNVERIFIED users who want to send money:
-1. Say: "To send money, I need to link your WhatsApp first. What's your email?"
-2. When user gives email → call request_whatsapp_verification(email, whatsappPhone)
-3. Tell user: "I sent a 6-digit code to [email]. Please send me the code."
-4. When user sends code → call verify_whatsapp_code(code, whatsappPhone)
-5. On success: "✅ Verified! Now let's continue with your transfer..."
-6. On failure: "❌ Invalid code. Please check and try again."
-
-NEVER proceed with create_transfer_order if user is NOT VERIFIED!
-
-=== SIMPLIFIED FLOW (FOR VERIFIED USERS ONLY) ===
-1. Amount → Calculate and show rate
-2. Recipient name + delivery details (bank or SBP phone)
-3. Payment method (MTN/Airtel/Sberbank/Cash)
-4. IMMEDIATELY show payment details - don't ask for extra confirmations!
-
-=== AUTHENTICATED USER DATA HANDLING ===
-- If USER context shows verified user with saved name/email → USE IT for orders!
-- If USER context shows "MISSING: name" or similar:
-  1. Ask user: "What's your full name for this transfer?"
-  2. When they answer → call update_user_profile to SAVE it
-  3. Then continue with order
-- DON'T re-ask for info already in USER profile
-- Auto-fill senderName/senderEmail/senderPhone from profile when creating orders
+For UNVERIFIED users:
+1. Ask email → call request_whatsapp_verification
+2. User sends code → call verify_whatsapp_code
+3. Only AFTER verified → continue with transfer
 
 === DON'T ASK FOR ===
-❌ Recipient's phone "for notifications" - NOT needed
-❌ User's phone number - we have WhatsApp
-❌ Extra confirmations of obvious things
+❌ Recipient phone if user said "I don't know" - SKIP IT!
+❌ Amount again after user said it
+❌ Bank name again after user said it
+❌ Re-confirmation of obvious things
 
 === TRANSACTION STATUS & PROOFS ===
 - "my orders" → call get_user_transactions_by_status
 - Transaction ID → call check_transaction_status
-- "send proof" / "show receipt" → call get_transfer_proof
-- If proof available → output: [[PROOF_IMAGE:URL]] (this sends image on WhatsApp)
+- "send proof" → call get_transfer_proof → [[PROOF_IMAGE:URL]]
 
 === LANGUAGE ===
 - DEFAULT: English
-- Switch to Russian only if user writes in Russian
-- Switch to French only if user writes in French
-- Technical terms always in English
+- Switch only if user writes in another language
 
 User phone: ${formattedPhone}`;
     }
 
     // Add context about image if present
     const imageHint = hasImage 
-      ? '\nNote: User sent an image. Analyze it carefully - if it\'s a payment screenshot, confirm the payment. If it\'s anything else, describe what you see briefly.'
+      ? '\nNote: User sent an image. If it looks like a payment screenshot/receipt, call upload_payment_proof to process it. Otherwise describe briefly.'
       : '';
     
     // Build messages array with image support
