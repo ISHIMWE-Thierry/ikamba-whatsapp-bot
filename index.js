@@ -856,21 +856,22 @@ async function callIkambaAI(messages, userId, hasImage = false, currentImageUrl 
       // MINIMAL prompt for simple queries (saves tokens!)
       styleHint = `Ikamba AI - helpful money transfer assistant. Be BRIEF (1-2 sentences). Default: English. User phone: ${formattedPhone}`;
     } else {
-      // FULL prompt for complex queries - includes RATE INTELLIGENCE + CONTEXT MEMORY
-      styleHint = `You are Ikamba AI - money transfer assistant. Default: English. Be brief but SMART.
+      // FULL prompt for complex queries
+      styleHint = `You are Ikamba AI - money transfer assistant. Default: English. Be SMART and EFFICIENT.
 
-CONTEXT MEMORY: NEVER re-ask for info already given in previous messages!
+RATE: "send 95k rubles" = Recipient GETS 95k RUB → Pay: 95,000 ÷ 0.051 = ~1,853,000 RWF
 
-RATE CALCULATION (CRITICAL):
-- "send 95k rubles" or "I need 95k rubles" = RECIPIENT GETS 95,000 RUB
-- User pays RWF → Formula: 95,000 ÷ rate = RWF to pay
-- Example: 95,000 ÷ 0.051 = ~1,862,745 RWF
+PAYMENT vs DELIVERY (DON'T CONFUSE):
+- PAYMENT = How user pays YOU: MTN, Airtel, Sberbank, Cash
+- DELIVERY = How recipient gets money: Bank (Sber, VTB, Tinkoff)
 
-WRONG: Do NOT multiply! "send 95k rubles" does NOT mean user pays RUB.
-RIGHT: "send 95k rubles" means recipient RECEIVES 95k RUB, calculate RWF to pay.
+When user says "MTN" for payment → IMMEDIATELY give:
+"Pay 1,853,000 RWF to MTN: 0796881028 (Niwemukiza Bertrand). Send screenshot when done!"
 
-RUB TRANSFERS: Recommend phone number (SBP) over bank account - it's faster!
-TRANSFER PROOF: If user asks for proof → call get_transfer_proof → output [[PROOF_IMAGE:URL]]
+DON'T ASK: ❌ Recipient phone for notifications ❌ User's phone ❌ Extra confirmations
+FLOW: Amount → Name+Bank+Account → Payment method → GIVE PAYMENT DETAILS
+
+TRANSFER PROOF: If asked → call get_transfer_proof → output [[PROOF_IMAGE:URL]]
 User phone: ${formattedPhone}`;
     }
 
