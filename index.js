@@ -723,6 +723,8 @@ async function extractMessageContent(msg, sock) {
   let imageBase64 = null;
   let hasImage = false;
   
+  console.log('📦 Raw message structure:', JSON.stringify(Object.keys(message || {})));
+  
   // Text messages
   if (message?.conversation) {
     text = message.conversation;
@@ -730,22 +732,38 @@ async function extractMessageContent(msg, sock) {
     text = message.extendedTextMessage.text;
   }
   
-  // Image messages
-  if (message?.imageMessage) {
+  // Image messages - check multiple possible structures
+  const imageMsg = message?.imageMessage || 
+                   message?.viewOnceMessage?.message?.imageMessage ||
+                   message?.viewOnceMessageV2?.message?.imageMessage ||
+                   message?.ephemeralMessage?.message?.imageMessage;
+  
+  if (imageMsg) {
     hasImage = true;
-    text = message.imageMessage.caption || null;
+    text = imageMsg.caption || text || null;
+    console.log('🖼️ Image detected! Caption:', imageMsg.caption || 'none');
     
     try {
-      // Download the image
-      const buffer = await downloadMediaMessage(msg, 'buffer', {});
-      imageBase64 = buffer.toString('base64');
+      // Download the image - need to handle viewOnce differently
+      let downloadMsg = msg;
+      if (message?.viewOnceMessage || message?.viewOnceMessageV2) {
+        // For view once messages, we need to extract the inner message
+        downloadMsg = {
+          ...msg,
+          message: message.viewOnceMessage?.message || message.viewOnceMessageV2?.message || message.ephemeralMessage?.message
+        };
+      }
       
-      // Optionally save to file
+      const buffer = await downloadMediaMessage(downloadMsg, 'buffer', {});
+      imageBase64 = buffer.toString('base64');
+      console.log(`   ✅ Image downloaded: ${buffer.length} bytes`);
+      
+      // Save to file for debugging
       const filename = `${Date.now()}.jpg`;
       fs.writeFileSync(path.join(mediaDir, filename), buffer);
       console.log(`   💾 Image saved: ${filename}`);
     } catch (err) {
-      console.error('Error downloading image:', err);
+      console.error('❌ Error downloading image:', err.message);
     }
   }
   
@@ -790,6 +808,8 @@ async function extractMessageContent(msg, sock) {
   if (message?.contactMessage) {
     text = `[User shared a contact: ${message.contactMessage.displayName}]`;
   }
+
+  console.log(`📤 Extracted: text="${text?.substring(0, 50) || 'none'}", hasImage=${hasImage}, imageSize=${imageBase64?.length || 0}`);
   
   return { text, imageBase64, hasImage };
 }
