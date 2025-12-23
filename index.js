@@ -896,7 +896,19 @@ For RUB transfers to Russia, RECOMMEND SBP (phone-based transfer):
 - If user gives "Name Bank Account" in one message → extract ALL parts
 - Don't ask for info already provided in the conversation
 
-=== SIMPLIFIED FLOW ===
+=== WHATSAPP VERIFICATION (MUST CHECK FIRST!) ===
+Before ANY money transfer, CHECK if user is verified:
+- If "WHATSAPP USER: ✅ VERIFIED" → proceed with order
+- If "WHATSAPP USER: ❌ NOT VERIFIED" → STOP and ask for verification:
+  1. Say: "To send money, I need to link your WhatsApp to your Ikamba account. What's your email?"
+  2. When user gives email → call request_whatsapp_verification
+  3. Tell user to check email for 6-digit code
+  4. When user sends code → call verify_whatsapp_code
+  5. Only AFTER successful verification → continue with transfer
+
+NEVER call create_transfer_order for unverified users!
+
+=== SIMPLIFIED FLOW (FOR VERIFIED USERS ONLY) ===
 1. Amount → Calculate and show rate
 2. Recipient name + delivery details (bank or SBP phone)
 3. Payment method (MTN/Airtel/Sberbank/Cash)
