@@ -118,7 +118,7 @@ function getInstantResponse(text) {
 
 // Determine query complexity for model selection
 function getQueryComplexity(text) {
-  if (!text) return 'simple';
+  if (!text) return 'complex'; // Images need full AI processing
   
   // Check for complex patterns first
   for (const pattern of COMPLEX_PATTERNS) {
@@ -140,6 +140,9 @@ function getQueryComplexity(text) {
 
 // Cache key generator
 function getCacheKey(text, userId) {
+  // Don't cache if no text (e.g., image-only messages)
+  if (!text) return null;
+  
   // Only cache rate queries and general info
   const normalized = text.toLowerCase().trim();
   if (/rate|курс|exchange|how much.*to/i.test(normalized)) {
